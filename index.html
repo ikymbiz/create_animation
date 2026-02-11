@@ -1,272 +1,403 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>AIキャラ抽出・切り抜きプロ</title>
-    <style>
-        :root { --primary: #4285f4; --bg: #1a1a1a; --card: rgba(255, 255, 255, 0.95); }
-        body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
-        
-        /* UIパネルのスタイル */
-        #ui { 
-            position: absolute; top: 20px; left: 20px; z-index: 100; 
-            background: var(--card); padding: 20px; border-radius: 24px; 
-            box-shadow: 0 15px 35px rgba(0,0,0,0.4); width: 300px;
-            backdrop-filter: blur(10px);
-        }
-        h3 { margin: 0 0 15px 0; color: var(--primary); font-size: 1.2rem; }
-        .box { margin-bottom: 15px; }
-        input[type="password"], input[type="file"] { 
-            width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; 
-            border: 1px solid #ddd; box-sizing: border-box; 
-        }
-        button { 
-            width: 100%; padding: 12px; margin-top: 8px; border-radius: 12px; 
-            border: none; font-weight: bold; color: white; cursor: pointer;
-            transition: transform 0.2s, background 0.3s;
-        }
-        button:active { transform: scale(0.96); }
-        .btn-save { background: #34a853; }
-        .btn-main { background: var(--primary); font-size: 1rem; box-shadow: 0 4px 15px rgba(66, 133, 244, 0.3); }
-        .btn-clear { background: #666; }
-
-        /* ステータス表示 */
-        #status { 
-            font-size: 13px; color: #d32f2f; margin: 10px 0; 
-            min-height: 1.5em; font-weight: bold; line-height: 1.4;
-        }
-        .info { font-size: 11px; color: #666; margin-top: 5px; }
-
-        canvas { display: block; cursor: move; }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>GenAI Cutout Parade (Gemini Edition)</title>
+  <style>
+    :root { --primary: #1a73e8; --accent: #ea4335; --bg: #202124; }
+    body { margin: 0; overflow: hidden; background: var(--bg); background-size: cover; background-position: center;
+      font-family: 'Google Sans', 'Helvetica Neue', Arial, sans-serif; touch-action: none; transition: background 1s ease; color: white; }
+    #ui { position: absolute; top: 15px; left: 15px; z-index: 100; background: rgba(32, 33, 36, 0.9);
+      padding: 20px; border-radius: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 320px;
+      backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+    h3 { margin: 0 0 15px 0; color: #8ab4f8; font-size: 1.2rem; display: flex; align-items: center; gap: 10px;}
+    .box { margin-bottom: 15px; }
+    input[type="password"] { background: #303134; color: white; border: 1px solid #5f6368; }
+    input, button { width: 100%; padding: 12px; margin-top: 6px; border-radius: 12px;
+      box-sizing: border-box; font-size: 14px; outline: none; }
+    button { cursor: pointer; border: none; font-weight: bold; color: white; transition: 0.2s; }
+    button:active { transform: scale(0.98); }
+    .btn-save { background: #34a853; color: #0f3818; }
+    .btn-main { background: #8ab4f8; color: #202124; box-shadow: 0 4px 15px rgba(138, 180, 248, 0.3); }
+    .btn-clear { background: #5f6368; margin-top: 10px; }
+    #status { font-size: 12px; color: #fbbc04; margin-top: 10px; font-weight: bold; min-height: 1.4em; line-height: 1.4; }
+    canvas { display: block; filter: drop-shadow(0 10px 20px rgba(0,0,0,0.6)); }
+    .hint { font-size: 10px; color: #9aa0a6; line-height: 1.4; margin-top: 8px; }
+    
+    /* Loading Animation */
+    .gemini-sparkle {
+      display: inline-block; width: 12px; height: 12px;
+      background: linear-gradient(135deg, #4285f4, #ea4335, #fbbc04, #34a853);
+      border-radius: 50%; animation: pulse 1s infinite; margin-right: 5px;
+    }
+    @keyframes pulse { 0% { transform: scale(0.8); opacity: 0.8; } 50% { transform: scale(1.2); opacity: 1; } 100% { transform: scale(0.8); opacity: 0.8; } }
+  </style>
+  
+  <script type="importmap">
+    {
+      "imports": {
+        "@google/generative-ai": "https://esm.run/@google/generative-ai",
+        "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/+esm"
+      }
+    }
+  </script>
 </head>
 <body>
 
 <div id="ui">
-    <h3>AI主役キャラ抽出</h3>
-    
-    <div class="box">
-        <input type="password" id="apiKey" placeholder="Gemini API Keyを入力">
-        <button class="btn-save" id="saveKeyBtn">キーを保存</button>
-    </div>
+  <h3><span class="gemini-sparkle"></span>Google AI Parade</h3>
 
-    <div class="box">
-        <div id="status">画像をアップロードしてください</div>
-        <input type="file" id="upload" accept="image/*" multiple>
-        <button class="btn-main" id="aiBtn">Geminiで主役を抽出</button>
+  <div class="box">
+    <input type="password" id="apiKey" placeholder="Gemini API Key (AI Studio)" />
+    <button class="btn-save" id="saveKeyBtn">APIキー保存</button>
+    <div class="hint">
+      ※Gemini APIキーが必要です。<br>
+      Geminiが画像を認識し、MediaPipeが切り抜きます。
     </div>
+  </div>
 
-    <button class="btn-clear" onclick="location.reload()">リセット</button>
-    <div class="info">※抽出したキャラはドラッグで動かせます</div>
+  <div class="box">
+    <div id="status">準備中... (AIモデル読込)</div>
+    <input type="file" id="upload" accept="image/*" multiple disabled />
+    <button class="btn-main" id="aiBtn" style="margin-top:10px;" disabled>
+      Geminiで認識 & 切り抜き
+    </button>
+  </div>
+
+  <button class="btn-clear" id="clearBtn">パレードをリセット</button>
 </div>
 
 <canvas id="stage"></canvas>
 
-<script>
-    const canvas = document.getElementById('stage');
-    const ctx = canvas.getContext('2d');
-    const upload = document.getElementById('upload');
-    const statusText = document.getElementById('status');
-    const apiKeyInput = document.getElementById('apiKey');
+<script type="module">
+  import { GoogleGenerativeAI } from "@google/generative-ai";
+  import { ImageSegmenter, FilesetResolver } from "@mediapipe/tasks-vision";
 
-    let drawings = [];
-    let dragTarget = null;
-    let dragOffsetX = 0, dragOffsetY = 0;
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const upload = document.getElementById('upload');
+  const statusText = document.getElementById('status');
+  const apiKeyInput = document.getElementById('apiKey');
+  const aiBtn = document.getElementById('aiBtn');
 
-    // 初期化
-    function init() {
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
-        apiKeyInput.value = localStorage.getItem('gemini_api_key') || '';
+  let drawings = [];
+  let dragTarget = null;
+  let dragOffsetX, dragOffsetY;
+  let imageSegmenter; // Google MediaPipe Instance
+
+  // --- 初期化 & MediaPipeモデル読み込み ---
+  async function init() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    apiKeyInput.value = localStorage.getItem('gemini_api_key') || '';
+
+    statusText.textContent = "Google Vision AI (切り抜き機能) を準備中...";
+    
+    try {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+      );
+      imageSegmenter = await ImageSegmenter.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/image_segmenter/deeplab_v3/float32/1/deeplab_v3.tflite",
+          delegate: "GPU"
+        },
+        runningMode: "IMAGE",
+        outputCategoryMask: true,
+        outputConfidenceMask: false
+      });
+      statusText.textContent = "準備OK：画像を選んでください";
+      upload.disabled = false;
+      aiBtn.disabled = false;
+    } catch (e) {
+      console.error(e);
+      statusText.textContent = "エラー：AIモデルの読み込みに失敗しました";
     }
-    window.addEventListener('resize', init);
-    init();
+  }
 
-    // 背景の白い部分（紙の色）を透明にする
-    function removeBackgroundPixels(imgCanvas) {
-        const cx = imgCanvas.getContext('2d');
-        const imageData = cx.getImageData(0, 0, imgCanvas.width, imgCanvas.height);
-        const data = imageData.data;
-        
-        for (let i = 0; i < data.length; i += 4) {
-            const r = data[i], g = data[i+1], b = data[i+2];
-            // 明るさが高い（白に近い）ピクセルを透明にする
-            const brightness = (r + g + b) / 3;
-            if (brightness > 215) { // 閾値調整可
-                data[i + 3] = 0;
-            }
-        }
-        cx.putImageData(imageData, 0, 0);
-        return imgCanvas;
+  window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  });
+  
+  // --- 基本クラス ---
+  class Drawing {
+    constructor(imgCanvas, originalFile, info) {
+      this.img = imgCanvas;
+      this.file = originalFile;
+      this.name = info.name || "Loading...";
+      const ratio = this.img.height / this.img.width;
+      this.width = Math.min(canvas.width, canvas.height) * 0.3;
+      this.height = this.width * ratio;
+      this.x = Math.random() * (canvas.width - this.width);
+      this.y = Math.random() * (canvas.height - this.height);
+      this.dx = (Math.random() - 0.5) * 1.5;
+      this.dy = (Math.random() - 0.5) * 1.5;
+      this.isDragging = false;
+      this.processed = false; // AI処理済みか
     }
-
-    class Drawing {
-        constructor(canvasElement, originalDataUrl) {
-            this.img = canvasElement;
-            this.src = originalDataUrl;
-            this.width = 250;
-            this.height = (canvasElement.height / canvasElement.width) * 250;
-            this.x = Math.random() * (canvas.width - this.width);
-            this.y = Math.random() * (canvas.height - this.height);
-        }
-        draw() {
-            // キャラクターに少し影をつける
-            ctx.shadowBlur = 15;
-            ctx.shadowColor = "rgba(0,0,0,0.3)";
-            ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
-            ctx.shadowBlur = 0;
-        }
-        contains(px, py) {
-            return px >= this.x && px <= this.x + this.width && py >= this.y && py <= this.y + this.height;
-        }
+    update() {
+      if (this.isDragging) return;
+      if (this.x + this.width > canvas.width || this.x < 0) this.dx *= -1;
+      if (this.y + this.height > canvas.height || this.y < 0) this.dy *= -1;
+      this.x += this.dx; this.y += this.dy;
     }
+    draw() {
+      ctx.save();
+      // 影
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.shadowBlur = 15;
+      ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
+      ctx.shadowBlur = 0;
 
-    // ファイル読み込み
-    upload.addEventListener('change', async (e) => {
-        const files = Array.from(e.target.files);
-        statusText.style.color = "#4285f4";
-        statusText.textContent = "読み込み中...";
+      // ラベル
+      const labelText = this.name;
+      ctx.font = "bold 14px 'Google Sans', sans-serif";
+      const tm = ctx.measureText(labelText);
+      const bgW = tm.width + 20;
+      
+      // ラベル背景
+      ctx.fillStyle = this.processed ? "rgba(232, 240, 254, 0.9)" : "rgba(60,64,67, 0.8)";
+      ctx.strokeStyle = this.processed ? "#8ab4f8" : "#5f6368";
+      ctx.lineWidth = 1;
+      
+      const lx = this.x + (this.width/2) - (bgW/2);
+      const ly = this.y - 35;
+      
+      ctx.beginPath();
+      ctx.roundRect(lx, ly, bgW, 28, 14);
+      ctx.fill();
+      ctx.stroke();
 
-        for (const file of files) {
-            const dataUrl = await new Promise(r => {
-                const reader = new FileReader();
-                reader.onload = (ev) => r(ev.target.result);
-                reader.readAsDataURL(file);
-            });
+      ctx.fillStyle = this.processed ? "#1967d2" : "#fff";
+      ctx.textAlign = "center";
+      ctx.fillText(labelText, this.x + (this.width/2), this.y - 16);
+      ctx.restore();
+    }
+    contains(px, py) {
+      return px >= this.x && px <= this.x + this.width && py >= this.y && py <= this.y + this.height;
+    }
+  }
 
-            const img = new Image();
-            img.src = dataUrl;
-            await img.decode();
+  // --- 画像アップロード ---
+  upload.addEventListener('change', async (e) => {
+    const files = Array.from(e.target.files);
+    statusText.textContent = "画像を配置中...";
 
-            const tempC = document.createElement('canvas');
-            tempC.width = img.width; tempC.height = img.height;
-            tempC.getContext('2d').drawImage(img, 0, 0);
+    for (const file of files) {
+      const img = await fileToImage(file);
+      // 最初は未処理のまま表示
+      drawings.push(new Drawing(img, file, { name: "未解析" }));
+    }
+    statusText.textContent = "準備完了！「Geminiで認識 & 切り抜き」を押してね";
+  });
 
-            drawings.push(new Drawing(tempC, dataUrl));
-        }
-        statusText.textContent = "準備完了！ボタンを押してね";
-    });
-
-    // Gemini API 呼び出し
-    document.getElementById('aiBtn').addEventListener('click', async () => {
-        const key = apiKeyInput.value.trim();
-        if (!key) return alert("Gemini APIキーを入力してください");
-        if (drawings.length === 0) return alert("画像をアップロードしてください");
-
-        statusText.style.color = "#f4b400";
-        statusText.textContent = "AIが主役を特定中...";
-
-        for (let d of drawings) {
-            try {
-                const base64Data = d.src.split(',')[1];
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
-
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [
-                            { text: "Detect the bounding box of the main single character/object in this image. Return ONLY a JSON array: [ymin, xmin, ymax, xmax]. Use a scale of 0 to 1000." },
-                            { inline_data: { mime_type: "image/png", data: base64Data } }
-                        ]}],
-                        generationConfig: { response_mime_type: "application/json" }
-                    })
-                });
-
-                if (!response.ok) throw new Error("APIリクエスト失敗");
-
-                const result = await response.json();
-                const jsonText = result.candidates[0].content.parts[0].text;
-                const box = JSON.parse(jsonText);
-                
-                // AIの返答形式が配列でない場合の対策
-                const coords = Array.isArray(box) ? box : (box.box || Object.values(box)[0]);
-
-                if (coords && coords.length === 4) {
-                    await applyCrop(d, coords);
-                    statusText.style.color = "#34a853";
-                    statusText.textContent = "抽出に成功しました！";
-                }
-            } catch (err) {
-                console.error(err);
-                statusText.style.color = "#d32f2f";
-                statusText.textContent = "エラー: 解析に失敗しました";
-            }
-        }
-    });
-
-    // 画像の切り抜き実行
-    async function applyCrop(drawingObj, [ymin, xmin, ymax, xmax]) {
+  function fileToImage(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
         const img = new Image();
-        img.src = drawingObj.src;
-        await img.decode();
-
-        const sw = ((xmax - xmin) / 1000) * img.width;
-        const sh = ((ymax - ymin) / 1000) * img.height;
-        const sx = (xmin / 1000) * img.width;
-        const sy = (ymin / 1000) * img.height;
-
-        const cropC = document.createElement('canvas');
-        cropC.width = sw; cropC.height = sh;
-        const cctx = cropC.getContext('2d');
-        
-        // 指定範囲をコピー
-        cctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-
-        // 背景透過処理を適用
-        drawingObj.img = removeBackgroundPixels(cropC);
-        drawingObj.height = (sh / sw) * drawingObj.width;
-    }
-
-    // 保存ボタン
-    document.getElementById('saveKeyBtn').addEventListener('click', () => {
-        localStorage.setItem('gemini_api_key', apiKeyInput.value);
-        alert('APIキーをブラウザに保存しました');
+        img.onload = () => resolve(img);
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
     });
+  }
 
-    // --- インタラクション設定 ---
-    function getMousePos(e) {
-        const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        return { x: clientX - rect.left, y: clientY - rect.top };
-    }
+  // --- FileオブジェクトからGoogleGenerativeAI用のPartを作成 ---
+  async function fileToGenerativePart(file) {
+    const base64EncodedDataPromise = new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result.split(',')[1]);
+      reader.readAsDataURL(file);
+    });
+    return {
+      inlineData: { data: await base64EncodedDataPromise, mimeType: file.type },
+    };
+  }
 
-    const startDrag = (e) => {
-        const pos = getMousePos(e);
-        for (let i = drawings.length - 1; i >= 0; i--) {
-            if (drawings[i].contains(pos.x, pos.y)) {
-                dragTarget = drawings[i];
-                dragOffsetX = pos.x - dragTarget.x;
-                dragOffsetY = pos.y - dragTarget.y;
-                // クリックしたものを最前面へ
-                drawings.push(drawings.splice(i, 1)[0]);
-                break;
-            }
+  // --- メイン処理：Gemini (分析) + MediaPipe (切り抜き) ---
+  aiBtn.addEventListener('click', async () => {
+    const key = apiKeyInput.value.trim();
+    if (!key) return alert("Gemini APIキーを入力してください");
+    if (drawings.length === 0) return alert("画像を追加してください");
+
+    const genAI = new GoogleGenerativeAI(key);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    statusText.textContent = "Google AIが順次処理中...";
+
+    try {
+      for (let i = 0; i < drawings.length; i++) {
+        const d = drawings[i];
+        if (d.processed) continue;
+
+        statusText.textContent = `処理中 (${i+1}/${drawings.length}): 分析&切り抜き...`;
+
+        // 1. Geminiで名前を特定 (並列でも良いがAPI制限考慮して直列)
+        const imagePart = await fileToGenerativePart(d.file);
+        const result = await model.generateContent([
+          "この画像のキャラクターや物体の名前を、日本語で一言（10文字以内）で答えて。例：「猫」「赤い車」。余計な文章は不要。",
+          imagePart
+        ]);
+        const response = await result.response;
+        const text = response.text().trim();
+        d.name = text.replace(/[\r\n]/g, '');
+
+        // 2. MediaPipeで背景削除
+        const originalImg = d.img; // HTMLImageElement or Canvas
+        // MediaPipeにはHTMLImageElementが必要
+        let inputElement = originalImg;
+        if (originalImg instanceof HTMLCanvasElement) {
+           // CanvasならImage化
+           inputElement = new Image();
+           inputElement.src = originalImg.toDataURL();
+           await new Promise(r => inputElement.onload = r);
         }
-    };
 
-    const doDrag = (e) => {
-        if (!dragTarget) return;
-        const pos = getMousePos(e);
-        dragTarget.x = pos.x - dragOffsetX;
-        dragTarget.y = pos.y - dragOffsetY;
-    };
+        const segmentationResult = await imageSegmenter.segment(inputElement);
+        const cutoutCanvas = applySegmentationMask(inputElement, segmentationResult);
 
-    canvas.addEventListener('mousedown', startDrag);
-    window.addEventListener('mousemove', doDrag);
-    window.addEventListener('mouseup', () => dragTarget = null);
-    canvas.addEventListener('touchstart', startDrag);
-    window.addEventListener('touchmove', doDrag);
-    window.addEventListener('touchend', () => dragTarget = null);
-
-    function animate() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        drawings.forEach(d => d.draw());
-        requestAnimationFrame(animate);
+        d.img = cutoutCanvas;
+        d.processed = true;
+        
+        // サイズ再計算（切り抜き後の比率に合わせる）
+        const ratio = d.img.height / d.img.width;
+        d.width = Math.min(canvas.width, canvas.height) * 0.3;
+        d.height = d.width * ratio;
+      }
+      statusText.textContent = "完了！Google AIパレードの始まりです";
+    } catch (e) {
+      console.error(e);
+      statusText.textContent = "エラー: APIキーを確認してください (コンソール詳細)";
     }
-    animate();
+  });
+
+  // --- MediaPipeの結果（マスク）を使って画像を切り抜く ---
+  function applySegmentationMask(img, segmentationResult) {
+    // categoryMaskを取得 (Uint8Array)
+    const { width, height } = img;
+    const mask = segmentationResult.categoryMask; 
+    
+    // 一時Canvas作成
+    const c = document.createElement("canvas");
+    c.width = width;
+    c.height = height;
+    const ctx = c.getContext("2d");
+    
+    // 元画像を描画
+    ctx.drawImage(img, 0, 0);
+    
+    // ピクセル操作でマスク適用
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    const maskData = mask.getAsUint8Array(); // 0:背景, 255:前景 (モデルによるが通常クラスID)
+
+    for (let i = 0; i < maskData.length; i++) {
+      // deeplab_v3などのsegmenterは、出力値がクラスインデックス
+      // 背景は通常0, 対象物はそれ以外。
+      // categoryMaskの場合、maskData[i]がカテゴリID
+      if (maskData[i] === 0) {
+        data[i * 4 + 3] = 0; // Alphaを0に
+      }
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
+    
+    // 余白をトリミング (自作Crop関数)
+    return cropToContent(c);
+  }
+
+  // 透明部分をトリミングする
+  function cropToContent(srcCanvas) {
+    const w = srcCanvas.width, h = srcCanvas.height;
+    const cx = srcCanvas.getContext('2d');
+    const { data } = cx.getImageData(0, 0, w, h);
+    
+    let minX = w, minY = h, maxX = 0, maxY = 0;
+    let found = false;
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (data[(y * w + x) * 4 + 3] > 10) { // alpha > 10
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+          found = true;
+        }
+      }
+    }
+    
+    if (!found) return srcCanvas;
+
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    const out = document.createElement('canvas');
+    out.width = cw;
+    out.height = ch;
+    out.getContext('2d').drawImage(srcCanvas, minX, minY, cw, ch, 0, 0, cw, ch);
+    return out;
+  }
+
+  // --- インタラクション (Touch対応) ---
+  function handleStart(e) {
+    const pos = getPos(e);
+    for (let i = drawings.length - 1; i >= 0; i--) {
+      if (drawings[i].contains(pos.x, pos.y)) {
+        dragTarget = drawings[i];
+        dragTarget.isDragging = true;
+        dragOffsetX = pos.x - dragTarget.x;
+        dragOffsetY = pos.y - dragTarget.y;
+        // 最前面へ
+        drawings.push(drawings.splice(i, 1)[0]);
+        break;
+      }
+    }
+  }
+  function getPos(e) {
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+  canvas.addEventListener('mousedown', handleStart);
+  canvas.addEventListener('touchstart', handleStart);
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragTarget) return;
+    const pos = getPos(e);
+    dragTarget.x = pos.x - dragOffsetX;
+    dragTarget.y = pos.y - dragOffsetY;
+  });
+  window.addEventListener('touchmove', (e) => {
+    if (!dragTarget) return;
+    const pos = getPos(e);
+    dragTarget.x = pos.x - dragOffsetX;
+    dragTarget.y = pos.y - dragOffsetY;
+  }, { passive: false });
+
+  window.addEventListener('mouseup', () => { if(dragTarget) dragTarget.isDragging = false; dragTarget = null; });
+  window.addEventListener('touchend', () => { if(dragTarget) dragTarget.isDragging = false; dragTarget = null; });
+
+  document.getElementById('saveKeyBtn').addEventListener('click', () => {
+    localStorage.setItem('gemini_api_key', apiKeyInput.value);
+    alert('キーを保存しました');
+  });
+
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    drawings = [];
+    statusText.textContent = "リセット完了";
+  });
+
+  function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawings.forEach(d => { d.update(); d.draw(); });
+    requestAnimationFrame(animate);
+  }
+  
+  // 開始
+  init();
 </script>
 </body>
 </html>
