@@ -3,29 +3,62 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Gemini Drawing Extractor</title>
+    <title>AIキャラ抽出・切り抜きプロ</title>
     <style>
-        :root { --primary: #4285f4; --accent: #ea4335; --bg: #f8f9fa; }
-        body { margin: 0; overflow: hidden; background: var(--bg); font-family: sans-serif; touch-action: none; }
-        #ui { position: absolute; top: 15px; left: 15px; z-index: 100; background: rgba(255,255,255,0.95); padding: 18px; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); width: 280px; }
-        input, button { width: 100%; padding: 12px; margin-top: 8px; border-radius: 10px; border: 1px solid #ddd; box-sizing: border-box; }
-        button { cursor: pointer; border: none; font-weight: bold; color: white; background: var(--primary); }
-        .btn-save { background: #34a853; margin-bottom: 10px; }
-        #status { font-size: 12px; color: #555; margin-top: 8px; font-weight: bold; }
-        canvas { display: block; }
+        :root { --primary: #4285f4; --bg: #1a1a1a; --card: rgba(255, 255, 255, 0.95); }
+        body { margin: 0; overflow: hidden; background: var(--bg); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
+        
+        /* UIパネルのスタイル */
+        #ui { 
+            position: absolute; top: 20px; left: 20px; z-index: 100; 
+            background: var(--card); padding: 20px; border-radius: 24px; 
+            box-shadow: 0 15px 35px rgba(0,0,0,0.4); width: 300px;
+            backdrop-filter: blur(10px);
+        }
+        h3 { margin: 0 0 15px 0; color: var(--primary); font-size: 1.2rem; }
+        .box { margin-bottom: 15px; }
+        input[type="password"], input[type="file"] { 
+            width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; 
+            border: 1px solid #ddd; box-sizing: border-box; 
+        }
+        button { 
+            width: 100%; padding: 12px; margin-top: 8px; border-radius: 12px; 
+            border: none; font-weight: bold; color: white; cursor: pointer;
+            transition: transform 0.2s, background 0.3s;
+        }
+        button:active { transform: scale(0.96); }
+        .btn-save { background: #34a853; }
+        .btn-main { background: var(--primary); font-size: 1rem; box-shadow: 0 4px 15px rgba(66, 133, 244, 0.3); }
+        .btn-clear { background: #666; }
+
+        /* ステータス表示 */
+        #status { 
+            font-size: 13px; color: #d32f2f; margin: 10px 0; 
+            min-height: 1.5em; font-weight: bold; line-height: 1.4;
+        }
+        .info { font-size: 11px; color: #666; margin-top: 5px; }
+
+        canvas { display: block; cursor: move; }
     </style>
 </head>
 <body>
 
 <div id="ui">
-    <h3 style="margin:0; color:var(--primary);">主役キャラ抽出</h3>
-    <input type="password" id="apiKey" placeholder="Gemini API Key">
-    <button class="btn-save" id="saveKeyBtn">キーを保存</button>
+    <h3>AI主役キャラ抽出</h3>
     
-    <div id="status">画像を選んでね</div>
-    <input type="file" id="upload" accept="image/*" multiple>
-    <button id="aiBtn">Geminiで主役を抽出</button>
-    <button style="background:#666;" onclick="location.reload()">リセット</button>
+    <div class="box">
+        <input type="password" id="apiKey" placeholder="Gemini API Keyを入力">
+        <button class="btn-save" id="saveKeyBtn">キーを保存</button>
+    </div>
+
+    <div class="box">
+        <div id="status">画像をアップロードしてください</div>
+        <input type="file" id="upload" accept="image/*" multiple>
+        <button class="btn-main" id="aiBtn">Geminiで主役を抽出</button>
+    </div>
+
+    <button class="btn-clear" onclick="location.reload()">リセット</button>
+    <div class="info">※抽出したキャラはドラッグで動かせます</div>
 </div>
 
 <canvas id="stage"></canvas>
@@ -39,7 +72,9 @@
 
     let drawings = [];
     let dragTarget = null;
+    let dragOffsetX = 0, dragOffsetY = 0;
 
+    // 初期化
     function init() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
@@ -48,123 +83,183 @@
     window.addEventListener('resize', init);
     init();
 
-    // 背景除去（白っぽい部分を透明にする）
-    function removeWhite(imgCanvas) {
+    // 背景の白い部分（紙の色）を透明にする
+    function removeBackgroundPixels(imgCanvas) {
         const cx = imgCanvas.getContext('2d');
         const imageData = cx.getImageData(0, 0, imgCanvas.width, imgCanvas.height);
         const data = imageData.data;
+        
         for (let i = 0; i < data.length; i += 4) {
-            const brightness = (data[i] + data[i+1] + data[i+2]) / 3;
-            if (brightness > 210) data[i+3] = 0; // 白背景を透明化
+            const r = data[i], g = data[i+1], b = data[i+2];
+            // 明るさが高い（白に近い）ピクセルを透明にする
+            const brightness = (r + g + b) / 3;
+            if (brightness > 215) { // 閾値調整可
+                data[i + 3] = 0;
+            }
         }
         cx.putImageData(imageData, 0, 0);
         return imgCanvas;
     }
 
     class Drawing {
-        constructor(img, originalDataUrl) {
-            this.img = img;
+        constructor(canvasElement, originalDataUrl) {
+            this.img = canvasElement;
             this.src = originalDataUrl;
-            this.x = Math.random() * (canvas.width - 200);
-            this.y = Math.random() * (canvas.height - 200);
-            this.width = 200;
-            this.height = (img.height / img.width) * 200;
+            this.width = 250;
+            this.height = (canvasElement.height / canvasElement.width) * 250;
+            this.x = Math.random() * (canvas.width - this.width);
+            this.y = Math.random() * (canvas.height - this.height);
         }
         draw() {
+            // キャラクターに少し影をつける
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = "rgba(0,0,0,0.3)";
             ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
+            ctx.shadowBlur = 0;
         }
         contains(px, py) {
             return px >= this.x && px <= this.x + this.width && py >= this.y && py <= this.y + this.height;
         }
     }
 
+    // ファイル読み込み
     upload.addEventListener('change', async (e) => {
         const files = Array.from(e.target.files);
+        statusText.style.color = "#4285f4";
+        statusText.textContent = "読み込み中...";
+
         for (const file of files) {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-                const img = new Image();
-                img.onload = () => {
-                    const tempC = document.createElement('canvas');
-                    tempC.width = img.width; tempC.height = img.height;
-                    tempC.getContext('2d').drawImage(img, 0, 0);
-                    drawings.push(new Drawing(tempC, ev.target.result));
-                    statusText.textContent = "読み込み完了。抽出ボタンを押して！";
-                };
-                img.src = ev.target.result;
-            };
-            reader.readAsDataURL(file);
+            const dataUrl = await new Promise(r => {
+                const reader = new FileReader();
+                reader.onload = (ev) => r(ev.target.result);
+                reader.readAsDataURL(file);
+            });
+
+            const img = new Image();
+            img.src = dataUrl;
+            await img.decode();
+
+            const tempC = document.createElement('canvas');
+            tempC.width = img.width; tempC.height = img.height;
+            tempC.getContext('2d').drawImage(img, 0, 0);
+
+            drawings.push(new Drawing(tempC, dataUrl));
         }
+        statusText.textContent = "準備完了！ボタンを押してね";
     });
 
+    // Gemini API 呼び出し
     document.getElementById('aiBtn').addEventListener('click', async () => {
-        const key = apiKeyInput.value;
-        if (!key || drawings.length === 0) return alert("APIキーと画像が必要です");
-        
-        statusText.textContent = "AIが主役を探しています...";
+        const key = apiKeyInput.value.trim();
+        if (!key) return alert("Gemini APIキーを入力してください");
+        if (drawings.length === 0) return alert("画像をアップロードしてください");
+
+        statusText.style.color = "#f4b400";
+        statusText.textContent = "AIが主役を特定中...";
 
         for (let d of drawings) {
             try {
-                const base64 = d.src.split(',')[1];
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+                const base64Data = d.src.split(',')[1];
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`;
+
+                const response = await fetch(apiUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         contents: [{ parts: [
-                            { text: "この画像からメインとなる絵（キャラクターなど）を1つだけ検出し、その範囲を [ymin, xmin, ymax, xmax] の数値配列で返してください。座標は0から1000の範囲で。JSON形式で出力して。" },
-                            { inline_data: { mime_type: "image/png", data: base64 } }
+                            { text: "Detect the bounding box of the main single character/object in this image. Return ONLY a JSON array: [ymin, xmin, ymax, xmax]. Use a scale of 0 to 1000." },
+                            { inline_data: { mime_type: "image/png", data: base64Data } }
                         ]}],
                         generationConfig: { response_mime_type: "application/json" }
                     })
                 });
+
+                if (!response.ok) throw new Error("APIリクエスト失敗");
+
+                const result = await response.json();
+                const jsonText = result.candidates[0].content.parts[0].text;
+                const box = JSON.parse(jsonText);
                 
-                const data = await response.json();
-                const resText = data.candidates[0].content.parts[0].text;
-                const box = JSON.parse(resText); 
-                const coords = Array.isArray(box) ? box : Object.values(box)[0]; // [ymin, xmin, ymax, xmax]
+                // AIの返答形式が配列でない場合の対策
+                const coords = Array.isArray(box) ? box : (box.box || Object.values(box)[0]);
 
-                // 切り抜き処理
-                const img = new Image();
-                img.src = d.src;
-                await img.decode();
-
-                const [ymin, xmin, ymax, xmax] = coords;
-                const sx = (xmin / 1000) * img.width;
-                const sy = (ymin / 1000) * img.height;
-                const sw = ((xmax - xmin) / 1000) * img.width;
-                const sh = ((ymax - ymin) / 1000) * img.height;
-
-                const cropC = document.createElement('canvas');
-                cropC.width = sw; cropC.height = sh;
-                cropC.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-                
-                d.img = removeWhite(cropC);
-                d.height = (sh / sw) * d.width;
-                statusText.textContent = "抽出成功！";
-            } catch (e) {
-                console.error(e);
-                statusText.textContent = "エラー発生";
+                if (coords && coords.length === 4) {
+                    await applyCrop(d, coords);
+                    statusText.style.color = "#34a853";
+                    statusText.textContent = "抽出に成功しました！";
+                }
+            } catch (err) {
+                console.error(err);
+                statusText.style.color = "#d32f2f";
+                statusText.textContent = "エラー: 解析に失敗しました";
             }
         }
     });
 
-    // 保存処理
+    // 画像の切り抜き実行
+    async function applyCrop(drawingObj, [ymin, xmin, ymax, xmax]) {
+        const img = new Image();
+        img.src = drawingObj.src;
+        await img.decode();
+
+        const sw = ((xmax - xmin) / 1000) * img.width;
+        const sh = ((ymax - ymin) / 1000) * img.height;
+        const sx = (xmin / 1000) * img.width;
+        const sy = (ymin / 1000) * img.height;
+
+        const cropC = document.createElement('canvas');
+        cropC.width = sw; cropC.height = sh;
+        const cctx = cropC.getContext('2d');
+        
+        // 指定範囲をコピー
+        cctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // 背景透過処理を適用
+        drawingObj.img = removeBackgroundPixels(cropC);
+        drawingObj.height = (sh / sw) * drawingObj.width;
+    }
+
+    // 保存ボタン
     document.getElementById('saveKeyBtn').addEventListener('click', () => {
         localStorage.setItem('gemini_api_key', apiKeyInput.value);
-        alert('キーを保存しました');
+        alert('APIキーをブラウザに保存しました');
     });
 
-    // ドラッグ操作
-    canvas.addEventListener('mousedown', (e) => {
+    // --- インタラクション設定 ---
+    function getMousePos(e) {
         const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-        dragTarget = drawings.findLast(d => d.contains(x, y));
-    });
-    window.addEventListener('mousemove', (e) => {
-        if (dragTarget) { dragTarget.x = e.clientX - 100; dragTarget.y = e.clientY - 100; }
-    });
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
+    const startDrag = (e) => {
+        const pos = getMousePos(e);
+        for (let i = drawings.length - 1; i >= 0; i--) {
+            if (drawings[i].contains(pos.x, pos.y)) {
+                dragTarget = drawings[i];
+                dragOffsetX = pos.x - dragTarget.x;
+                dragOffsetY = pos.y - dragTarget.y;
+                // クリックしたものを最前面へ
+                drawings.push(drawings.splice(i, 1)[0]);
+                break;
+            }
+        }
+    };
+
+    const doDrag = (e) => {
+        if (!dragTarget) return;
+        const pos = getMousePos(e);
+        dragTarget.x = pos.x - dragOffsetX;
+        dragTarget.y = pos.y - dragOffsetY;
+    };
+
+    canvas.addEventListener('mousedown', startDrag);
+    window.addEventListener('mousemove', doDrag);
     window.addEventListener('mouseup', () => dragTarget = null);
+    canvas.addEventListener('touchstart', startDrag);
+    window.addEventListener('touchmove', doDrag);
+    window.addEventListener('touchend', () => dragTarget = null);
 
     function animate() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
