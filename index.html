@@ -3,19 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>GenAIお絵かきパレード</title>
+    <title>GenAIお絵かきパレード(安定版)</title>
     <script src="https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.4.5/dist/bundle.js"></script>
     <style>
         :root { --primary: #7e57c2; --danger: #ef5350; --success: #26a69a; }
-        body { margin: 0; overflow: hidden; background: #e0f7fa cover center; font-family: sans-serif; touch-action: none; }
-        #ui-layer { position: absolute; top: 15px; left: 15px; z-index: 100; background: rgba(255, 255, 255, 0.9); padding: 20px; border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); max-width: 280px; }
+        body { margin: 0; overflow: hidden; background: #e0f7fa; background-size: cover; background-position: center; font-family: sans-serif; touch-action: none; }
+        #ui-layer { position: absolute; top: 15px; left: 15px; z-index: 100; background: rgba(255, 255, 255, 0.95); padding: 20px; border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.1); width: 260px; }
         .section { border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 10px; }
-        input, button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: none; box-sizing: border-box; }
-        button { cursor: pointer; font-weight: bold; color: white; }
+        input, button { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
+        button { cursor: pointer; font-weight: bold; color: white; border: none; }
         .btn-ai { background: var(--primary); }
         .btn-save { background: var(--success); }
         .btn-clear { background: var(--danger); }
-        #status { font-size: 0.8rem; color: #d32f2f; font-weight: bold; }
+        #status { font-size: 0.75rem; color: #d32f2f; margin: 5px 0; min-height: 1.2em; word-break: break-all; }
         canvas { display: block; }
     </style>
 </head>
@@ -28,7 +28,7 @@
         <button class="btn-save" id="saveKeyBtn">キーを保存</button>
     </div>
     <div class="section">
-        <p id="status">準備OK</p>
+        <div id="status">ライブラリ読み込み中...</div>
         <input type="file" id="upload" accept="image/*" multiple>
         <button class="btn-ai" id="aiBgBtn">AI背景を生成</button>
     </div>
@@ -52,16 +52,22 @@
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         apiKeyInput.value = localStorage.getItem('gemini_api_key') || '';
+        statusText.textContent = "準備完了（絵を選んでね）";
     }
     window.addEventListener('resize', init);
     init();
 
-    // --- AIによる背景削除処理 ---
-    async function processImageAI(file) {
-        statusText.textContent = "AIが切り抜き中...";
+    // --- 背景削除処理 ---
+    async function processImage(file) {
+        statusText.textContent = "AI解析を開始...";
         try {
-            // imglyのAIモデルを使用して背景を削除
-            const blob = await imglyRemoveBackground(file);
+            // ライブラリが存在するかチェック
+            if (typeof imglyRemoveBackground === 'undefined') {
+                throw new Error("AIライブラリの読み込みに失敗しています");
+            }
+
+            // AIによる切り抜き
+            const blob = await imglyRemoveBackground.removeBackground(file);
             const url = URL.createObjectURL(blob);
             
             return new Promise((resolve) => {
@@ -71,9 +77,36 @@
             });
         } catch (e) {
             console.error(e);
-            statusText.textContent = "AI切り抜き失敗";
-            return null;
+            statusText.textContent = "AI失敗：簡易処理に切り替えます";
+            // 失敗した場合は、簡易的な「白を消す」処理へ
+            return await fallbackProcess(file);
         }
+    }
+
+    // AIがダメだった時のバックアップ（白消し）
+    async function fallbackProcess(file) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const img = new Image();
+                img.onload = () => {
+                    const c = document.createElement('canvas');
+                    const cx = c.getContext('2d');
+                    c.width = img.width; c.height = img.height;
+                    cx.drawImage(img, 0, 0);
+                    const data = cx.getImageData(0,0,c.width,c.height);
+                    for(let i=0; i<data.data.length; i+=4) {
+                        if(data.data[i]>200 && data.data[i+1]>200 && data.data[i+2]>200) data.data[i+3]=0;
+                    }
+                    cx.putImageData(data,0,0);
+                    const newImg = new Image();
+                    newImg.onload = () => resolve({ img: newImg, url: e.target.result });
+                    newImg.src = c.toDataURL();
+                };
+                img.src = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
     }
 
     class Drawing {
@@ -85,8 +118,8 @@
             this.height = this.width * ratio;
             this.x = Math.random() * (canvas.width - this.width);
             this.y = Math.random() * (canvas.height - this.height);
-            this.dx = (Math.random() - 0.5) * 4;
-            this.dy = (Math.random() - 0.5) * 4;
+            this.dx = (Math.random() - 0.5) * 3;
+            this.dy = (Math.random() - 0.5) * 3;
             this.isDragging = false;
         }
         update() {
@@ -104,16 +137,10 @@
     upload.addEventListener('change', async (e) => {
         const files = Array.from(e.target.files);
         for (const file of files) {
-            const originalSrc = await new Promise(r => {
-                const fr = new FileReader();
-                fr.onload = () => r(fr.result);
-                fr.readAsDataURL(file);
-            });
-            
-            const aiProcessed = await processImageAI(file);
-            if (aiProcessed) {
-                drawings.push(new Drawing(aiProcessed, originalSrc));
-                statusText.textContent = "完了！";
+            const processed = await processImage(file);
+            if (processed) {
+                drawings.push(new Drawing(processed, processed.url));
+                statusText.textContent = "追加完了！";
             }
         }
         upload.value = "";
@@ -149,7 +176,7 @@
         drawings = drawings.filter(d => !d.contains(pos.x, pos.y));
     });
 
-    // --- Gemini API背景生成 ---
+    // --- Gemini API ---
     document.getElementById('saveKeyBtn').addEventListener('click', () => {
         localStorage.setItem('gemini_api_key', apiKeyInput.value);
         alert('キーを保存しました');
@@ -159,7 +186,7 @@
         const key = apiKeyInput.value;
         if (!key || drawings.length === 0) return alert("キーと絵が必要です");
         
-        statusText.textContent = "AI背景を考え中...";
+        statusText.textContent = "AIが背景を考え中...";
         try {
             const last = drawings[drawings.length - 1];
             const base64 = last.originalSrc.split(',')[1];
@@ -168,23 +195,24 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{ parts: [
-                        { text: "What setting would this drawing look best in? Answer with one English noun (e.g., 'jungle', 'mars', 'underwater')." },
+                        { text: "Choose one word for a background: forest, ocean, space, desert, or city." },
                         { inline_data: { mime_type: "image/png", data: base64 } }
                     ]}]
                 })
             });
             const data = await response.json();
-            const keyword = data.candidates[0].content.parts[0].text.trim().toLowerCase();
-            document.body.style.backgroundImage = `url('https://loremflickr.com/1920/1080/${keyword}')`;
-            statusText.textContent = `背景：${keyword}`;
+            const keyword = data.candidates[0].content.parts[0].text.trim().toLowerCase().replace(/[^a-z]/g, '');
+            document.body.style.backgroundImage = `url('https://loremflickr.com/1280/720/${keyword}')`;
+            statusText.textContent = `背景テーマ：${keyword}`;
         } catch (e) {
-            statusText.textContent = "AI背景生成失敗";
+            statusText.textContent = "背景生成に失敗しました";
         }
     });
 
     document.getElementById('clearBtn').addEventListener('click', () => {
         drawings = [];
         document.body.style.backgroundImage = 'none';
+        statusText.textContent = "リセットしました";
     });
 
     function animate() {
